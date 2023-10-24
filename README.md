@@ -4,8 +4,8 @@
 
 未添加校验成功或失败交互，可根据实际业务场景修改。
 
-![效果图](.\public\result.png)
-![效果图](.\public\result2.png)
+![效果图](./public/result.png)
+![效果图](./public/result2.png)
 
 ## 运行命令
 
