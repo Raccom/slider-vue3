@@ -1,30 +1,33 @@
 <template>
     <div id="verify">
-        <h2>请<span style="color:#f56a00">拖动</span>左侧滑块完成拼图</h2>
         <div class="paperWrap">
             <div class="canvas-wrap">
+                <div class="mask" v-show="!canRefresh && !slideDiff"><img src="./assets/verify/icons/load.svg" alt=""
+                        @click="fresh"></div>
                 <canvas class="paper" ref="paperRef" :width="canvasWidth" :height="canvasHeight"></canvas>
                 <canvas class="block" ref="blockRef" :width="canvasWidth" :height="canvasHeight"></canvas>
+                <div class="buttonWrap">
+                    <img src="./assets/verify/icons/question.svg" alt="">
+                    <img src="./assets/verify/icons/reload.svg" alt="" @click="fresh">
+                </div>
             </div>
         </div>
         <div class="sliderWrap">
             <div class="progress-wrap">
-                <div ref="innerRef" class="inner-bar"></div>
-                <div ref="buttonRef" class="button" @mousedown="down">
-                    <img src="./assets/verify/arrow.svg" alt="">
+                <p class="placeHolder" v-show="!slideDiff">向右拖动滑块完成拼图</p>
+                <div ref="innerRef" :class="['inner-bar', status]"></div>
+                <div ref="buttonRef" :class="['button', status]" @mousedown="down">
+                    <img :src="pathList['icon'][status]" alt="" draggable="false">
                 </div>
             </div>
-        </div>
-        <div class="buttonWrap">
-            <img src="./assets/verify/question.svg" alt="">
-            <img src="./assets/verify/reload.svg" alt="" @click="fresh">
         </div>
     </div>
 </template>
 
 <script setup>
 import { ref, computed, onMounted, onUnmounted } from 'vue';
-const canvasWidth = 350; // 验证图片的大小
+
+const canvasWidth = 350; // 验证背景图片和canvas的大小
 const canvasHeight = 160;
 const canvasWidthStyle = `${canvasWidth}px`; // canvas的动态样式
 const canvasHeightStyle = `${canvasHeight}px`;
@@ -36,28 +39,39 @@ const paperDeviation = ref(0); // 拼图块随机的x轴偏移量
 const blockSize = ref(8); // 拼图块的尺寸
 const paperRef = ref(null);  // 拼图背景的Ref引用
 const blockRef = ref(null);  // 拼图块的Ref引用
+const currentIdx = ref(0) // 当前背景index 防止刷新多次出现重复背景
 
-const slideX = ref(0);   // 按下滑块时鼠标距离左侧的距离
 const isDown = ref(false); // 是否按下拖动按钮
+const slideX = ref(0);   // 按下滑块时鼠标距离左侧的距离
 const curX = ref(0); // 鼠标距离左侧的距离
 const slideDiff = ref(0); // 鼠标移动的距离
-const innerRef = ref(null); // 滑块左侧黑色区域的Ref引用
+const innerRef = ref(null); // 滑块左侧已划过区域的Ref引用
 const buttonRef = ref(null); // 滑块实例
 
-// 拼图块的位置 用户移动的距离 + 初始偏移的距离 + 120
+const canRefresh = ref(true); // 背景图片加载是否完成
+const status = ref('default') // 校验状态 默认 -> default | 成功 -> success | 失败 -> error 
+
+// 拼图块的位移样式 用户移动的距离 + 随机初始偏移的距离 + 拼图块初始距离背景左侧的距离 - 背景总宽度
 const diffStyle = computed(() => `translateX(${slideDiff.value + paperDeviation.value - canvasWidth + transformLeft}px)`);
 
-const bgList = [
-    new URL(`./assets/verify/bg/1.jpg`, import.meta.url).href,
-    new URL(`./assets/verify/bg/2.jpg`, import.meta.url).href,
-    new URL(`./assets/verify/bg/3.jpg`, import.meta.url).href,
-    new URL(`./assets/verify/bg/4.jpg`, import.meta.url).href,
-    new URL(`./assets/verify/bg/5.jpg`, import.meta.url).href,
-    new URL(`./assets/verify/bg/6.jpg`, import.meta.url).href,
-    new URL(`./assets/verify/bg/7.jpg`, import.meta.url).href,
-    new URL(`./assets/verify/bg/8.jpg`, import.meta.url).href,
-    new URL(`./assets/verify/bg/9.jpg`, import.meta.url).href,
-]
+// 默认 成功 失败 icon、背景图片的路径
+const pathList = {
+    icon: {
+        default: new URL(`./assets/verify/icons/arrow.svg`, import.meta.url).href,
+        success: new URL(`./assets/verify/icons/success.svg`, import.meta.url).href,
+        error: new URL(`./assets/verify/icons/fail.svg`, import.meta.url).href,
+    },
+    bg: [
+        new URL(`./assets/verify/bg/1.jpg`, import.meta.url).href,
+        new URL(`./assets/verify/bg/2.jpg`, import.meta.url).href,
+        new URL(`./assets/verify/bg/3.jpg`, import.meta.url).href,
+        new URL(`./assets/verify/bg/4.jpg`, import.meta.url).href,
+        new URL(`./assets/verify/bg/5.jpg`, import.meta.url).href,
+        new URL(`./assets/verify/bg/6.jpg`, import.meta.url).href,
+        new URL(`./assets/verify/bg/7.jpg`, import.meta.url).href,
+        new URL(`./assets/verify/bg/8.jpg`, import.meta.url).href,
+    ]
+}
 
 /**
 * 绘制拼图块的形状 并根据填充方式opt选择 填充渲染 或 剪切渲染
@@ -65,22 +79,21 @@ const bgList = [
 * @param {'fill'|'clip'} opt 填充方式 fill -> 渲染拼图块形状外背景 | clip -> 只渲染拼图块内背景
 */
 const draw = (ctx, opt) => {
-    const size = blockSize.value;
     ctx.beginPath();
     ctx.moveTo(paperX.value, paperY.value);
-    ctx.lineTo(paperX.value + size, paperY.value);
+    ctx.lineTo(paperX.value + blockSize.value, paperY.value);
 
     //绘制上方弧形
-    ctx.arc(paperX.value + (2.5 * size), paperY.value, size, deg2arc(-180), deg2arc(0));
-    ctx.lineTo(paperX.value + (5 * size), paperY.value);
-    ctx.lineTo(paperX.value + (5 * size), paperY.value + size);
+    ctx.arc(paperX.value + (2.5 * blockSize.value), paperY.value, blockSize.value, deg2arc(-180), deg2arc(0));
+    ctx.lineTo(paperX.value + (5 * blockSize.value), paperY.value);
+    ctx.lineTo(paperX.value + (5 * blockSize.value), paperY.value + blockSize.value);
     //绘制右侧弧形
-    ctx.arc(paperX.value + (5 * size), paperY.value + (2.5 * size), size, deg2arc(-90), deg2arc(90));
-    ctx.lineTo(paperX.value + (5 * size), paperY.value + (5 * size));
-    ctx.lineTo(paperX.value, paperY.value + (5 * size));
-    ctx.lineTo(paperX.value, paperY.value + (4 * size));
+    ctx.arc(paperX.value + (5 * blockSize.value), paperY.value + (2.5 * blockSize.value), blockSize.value, deg2arc(-90), deg2arc(90));
+    ctx.lineTo(paperX.value + (5 * blockSize.value), paperY.value + (5 * blockSize.value));
+    ctx.lineTo(paperX.value, paperY.value + (5 * blockSize.value));
+    ctx.lineTo(paperX.value, paperY.value + (4 * blockSize.value));
     //绘制左侧弧形,true表示逆时针绘制
-    ctx.arc(paperX.value, paperY.value + (2.5 * size), size, deg2arc(90), deg2arc(-90), true);
+    ctx.arc(paperX.value, paperY.value + (2.5 * blockSize.value), blockSize.value, deg2arc(90), deg2arc(-90), true);
     ctx.lineTo(paperX.value, paperY.value);
 
     ctx.lineWidth = 2;
@@ -103,17 +116,17 @@ const deg2arc = (deg) => {
 * @returns {number} 随机数
 */
 const getRandom = (min, max) => {
-    let c = max - min + 1;
-    return Math.random() * c + min;
+    return Math.random() * (max - min + 1) + min;
 }
 
 //按下按钮处理
 const down = (e) => {
+    if (!canRefresh.value) return;
     isDown.value = true;
     slideX.value = e.pageX;
-    document.addEventListener("mousemove", move);
     e.preventDefault();
     e.stopPropagation();
+    document.addEventListener("mousemove", move);
 }
 
 //移动按钮处理
@@ -132,51 +145,65 @@ const move = (e) => {
 
 //鼠标抬起处理
 const up = () => {
-    if (isDown.value) {
-        const shouldVerify = slideDiff.value > 50; // 移动超过50像素才进行判断
-        if (shouldVerify) {
-            const verifySize = 4; // 校验误差
-            const transformDistance = canvasWidth - transformLeft - paperDeviation.value;
-            if (slideDiff.value > (transformDistance - verifySize) && slideDiff.value < (transformDistance + verifySize)) {
-                props.success();
-                message('success', '校验成功');
-            }
-        }
+    // 滑块位移后才进行校验判断
+    if (!slideDiff.value) {
+        return document.removeEventListener('mousemove', move);
+    }
+    canRefresh.value = false;
 
+    const verifySize = 4; // 校验误差范围
+    const transformDistance = canvasWidth - transformLeft - paperDeviation.value;
+    if (slideDiff.value > (transformDistance - verifySize) && slideDiff.value < (transformDistance + verifySize)) {
+        status.value = 'success';
+        // 校验成功
+    } else {
+        status.value = 'error';
+        // 校验失败
+    }
+    document.removeEventListener('mousemove', move);
+
+    setTimeout(() => {
+        status.value = 'default';
         // 重置滑块的距离
         isDown.value = false;
         slideDiff.value = 0;
         innerRef.value.style.width = 20 + 'px';
         buttonRef.value.style.transform = `translateX(0)`;
-        shouldVerify && fresh();
-    }
-    document.removeEventListener('mousemove', move);
+        fresh();
+    }, 500);
 }
 
 const fresh = () => {
+    canRefresh.value = false;
+
     paperDeviation.value = getRandom(0, 150); // 拼图块随机的x轴偏移量
-    paperX.value = canvasWidth - transformLeft - paperDeviation.value + 20;  // 拼图块的初始x轴位置 (-偏移量则拼图缺口偏移， 不-偏移量则拼图块偏移)
+    paperX.value = canvasWidth - transformLeft - paperDeviation.value + 20;  // 拼图块的初始x轴位置 (减偏移量则拼图缺口偏移， 不减偏移量则拼图块偏移)
     paperY.value = getRandom(20, 80); // 拼图块的初始y轴位置
 
-    let img = document.createElement('img');
+    const img = document.createElement('img');
+    let newIdx = parseInt(getRandom(0, pathList.bg.length - 1));
+    while (newIdx === currentIdx.value) {
+        newIdx = parseInt(getRandom(0, pathList.bg.length - 1));
+    }
+    currentIdx.value = newIdx;
+    img.src = pathList['bg'][newIdx];
     img.onload = () => {
         // 重新设置canvas的宽高来刷新canvas (clearRect清除有图形残留)
         paperRef.value.width = canvasWidth;
         paperRef.value.height = canvasHeight;
         blockRef.value.width = canvasWidth;
         blockRef.value.height = canvasHeight;
-
-        let ctx = paperRef.value.getContext('2d');
-        let block_ctx = blockRef.value.getContext('2d');
-
+        const ctx = paperRef.value.getContext('2d');
+        const block_ctx = blockRef.value.getContext('2d');
+        //绘制碎片形状 先画路径，之后再填充图片
         draw(ctx, 'fill');
         ctx.drawImage(img, 0, 0, canvasWidth, canvasHeight);
-        //绘制碎片形状 先画路径，之后再填充图片
         draw(block_ctx, 'clip');
         block_ctx.drawImage(img, 0, 0, canvasWidth, canvasHeight);
+
+        canRefresh.value = true;
     }
-    const index = parseInt(getRandom(1, 9));
-    img.src = bgList[index];
+    img.onerror = () => fresh();
 }
 
 onMounted(() => {
@@ -191,19 +218,14 @@ onUnmounted(() => {
 
 <style lang="scss">
 #verify {
-    text-align: center;
-    color: #2c3e50;
     width: v-bind(canvasWidthStyle);
+    height: 230px;
     padding: 10px 15px;
     margin: 0 auto;
     border: 1px solid #ccc;
     border-radius: 5px;
-
-    h2 {
-        font-size: 16px;
-        text-align: start;
-        font-weight: lighter;
-    }
+    color: #2c3e50;
+    text-align: center;
 
     .sliderWrap {
         padding: 20px 0 10px;
@@ -213,50 +235,148 @@ onUnmounted(() => {
         width: v-bind(canvasWidthStyle);
         height: v-bind(canvasHeightStyle);
         margin: 0 auto;
-        position: relative;
         border-radius: 5px;
+        position: relative;
         overflow: hidden;
 
-        canvas {
+        %absolute {
             position: absolute;
             top: 0;
             left: 0;
         }
 
+        canvas {
+            @extend %absolute;
+        }
+
         .block {
             transform: v-bind(diffStyle)
+        }
+
+        .buttonWrap {
+            @extend %absolute;
+            left: auto;
+            top: 0;
+            right: 0;
+            padding: 2px 5px;
+            display: flex;
+            justify-content: flex-end;
+            background-color: rgba(0, 0, 0, .2);
+
+            &:hover {
+                background-color: rgba(0, 0, 0, .3);
+            }
+
+            img {
+                width: 30px;
+                height: 30px;
+                margin-right: 5px;
+                user-select: none;
+                opacity: .5;
+                transition: .3s;
+                cursor: pointer;
+
+                &:hover {
+                    opacity: 1;
+                }
+            }
+        }
+
+        .mask {
+            @extend %absolute;
+            width: 100%;
+            height: 100%;
+            display: flex;
+            z-index: 6;
+            background-color: rgba(255, 255, 255, .7);
+
+            @keyframes turn {
+                0% {
+                    transform: rotate(0deg);
+                }
+
+                25% {
+                    transform: rotate(90deg);
+                }
+
+                50% {
+                    transform: rotate(180deg);
+                }
+
+                75% {
+                    transform: rotate(270deg);
+                }
+
+                100% {
+                    transform: rotate(360deg);
+                }
+            }
+
+            img {
+                width: 30px;
+                height: 30px;
+                margin: auto;
+                color: #9ba4ab;
+                user-select: none;
+                animation: turn 2s linear infinite;
+            }
         }
     }
 
     .progress-wrap {
-        height: 30px;
-        background-color: #ccc;
-        border-radius: 8px;
         position: relative;
+        height: 40px;
+        border: 1px solid #e4e7eb;
+        border-radius: 3px;
         box-sizing: border-box;
+        background-color: #f7f9fa;
+
+        .placeHolder {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            height: 14px;
+            width: 100%;
+            margin: 0;
+            font-size: 14px;
+            font-weight: lighter;
+            line-height: 1;
+            transform: translate(-50%, -50%);
+            user-select: none;
+        }
 
         .inner-bar {
-            height: 30px;
-            background-color: #cffaed;
-            border: 1px solid #7af4d0;
+            height: 40px;
             width: 0;
-            border-radius: 8px;
-            z-index: 1;
+            border: 1px solid #1991fa;
+            border-radius: 3px;
             box-sizing: border-box;
+            background-color: #d1e9fe;
+            z-index: 1;
+
+            &.success {
+                background-color: #d2f4ef;
+                border-color: #4dc7c0;
+            }
+
+            &.error {
+                background-color: #fce1e1;
+                border-color: #f57a7a;
+            }
         }
 
         .button {
             position: absolute;
-            top: -5px;
-            height: 40px;
-            transform: translateX(0);
+            top: 0;
             left: 0;
+            height: 40px;
             width: 60px;
-            display: flex;
-            z-index: 6;
-            border-radius: 8px;
             box-sizing: border-box;
-            background: #0da68c;
+            border-radius: 3px;
+            z-index: 6;
+            display: flex;
+            transform: translateX(0);
+            background: #2a6cfe;
             cursor: pointer;
 
             img {
@@ -264,18 +384,14 @@ onUnmounted(() => {
                 height: 60%;
                 margin: auto;
             }
-        }
-    }
 
-    .buttonWrap {
-        display: flex;
-        justify-content: flex-end;
+            &.success {
+                background-color: #4dc7c0;
+            }
 
-        img {
-            width: 30px;
-            height: 30px;
-            margin-left: 5px;
-            cursor: pointer;
+            &.error {
+                background-color: #f57a7a;
+            }
         }
     }
 }
